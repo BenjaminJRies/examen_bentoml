@@ -1,0 +1,22 @@
+service: "src.service_new:service"
+description: "Student Admission Prediction Service using Linear Regression"
+labels:
+  owner: "admission_team"
+  project: "admission_prediction"
+  version: "1.0.0"
+
+include:
+  - src/
+  - models/
+  - data/
+
+python:
+  packages:
+    - numpy
+    - pandas
+    - scikit-learn
+    - bentoml>=1.0.0
+    - pydantic
+    - pyjwt
+    - starlette
+    - fastapi
