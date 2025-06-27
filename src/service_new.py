@@ -6,9 +6,11 @@ Inspired by the accidents project structure
 import numpy as np
 import bentoml
 from bentoml.io import JSON
+from bentoml.exceptions import BentoMLException
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.exceptions import HTTPException
 import jwt
 from datetime import datetime, timedelta
 
@@ -72,24 +74,27 @@ class LoginCredentials(BaseModel):
     username: str = Field(..., description="Username")
     password: str = Field(..., description="Password")
 
-# Load models from BentoML Model Store
+# Load models from joblib files
+import joblib
+import os
+
+MODEL_PATH = "/app/models"
 try:
-    # Try to get the latest models from BentoML store
-    admission_model_runner = bentoml.sklearn.get("admission_predictor:latest").to_runner()
-    scaler_runner = bentoml.sklearn.get("admission_scaler:latest").to_runner()
-    print("✅ Models loaded from BentoML store")
+    # Load models from joblib files
+    admission_model = joblib.load(os.path.join(MODEL_PATH, "admission_model.joblib"))
+    scaler = joblib.load(os.path.join(MODEL_PATH, "scaler.joblib"))
+    feature_names = joblib.load(os.path.join(MODEL_PATH, "feature_names.joblib"))
+    print("✅ Models loaded from joblib files")
     MODELS_LOADED = True
 except Exception as e:
-    print(f"⚠️ Could not load models from BentoML store: {e}")
+    print(f"⚠️ Could not load models from joblib files: {e}")
     MODELS_LOADED = False
-    admission_model_runner = None
-    scaler_runner = None
+    admission_model = None
+    scaler = None
+    feature_names = None
 
 # Create the BentoML service
-if MODELS_LOADED:
-    service = bentoml.Service("admission_prediction_service", runners=[admission_model_runner, scaler_runner])
-else:
-    service = bentoml.Service("admission_prediction_service", runners=[])
+service = bentoml.Service("admission_prediction_service", runners=[])
 
 # Add JWT authentication middleware
 service.add_asgi_middleware(JWTAuthMiddleware)
@@ -127,8 +132,8 @@ def interpret_prediction(chance: float):
 
 # API Endpoints
 
-@service.api(input=JSON(), output=JSON())
-def health(input_data) -> dict:
+@service.api(input=bentoml.io.Text(), output=JSON())
+def health(input_data: str = "") -> dict:
     """Health check endpoint"""
     return {
         "status": "healthy",
@@ -139,10 +144,15 @@ def health(input_data) -> dict:
     }
 
 @service.api(input=JSON(pydantic_model=LoginCredentials), output=JSON())
-def login(credentials: LoginCredentials) -> dict:
+async def login(credentials: LoginCredentials, ctx: bentoml.Context) -> dict:
     """Login endpoint for authentication"""
     username = credentials.username
     password = credentials.password
+    
+    # Check for empty credentials
+    if not username or not password:
+        ctx.response.status_code = 401
+        return {"detail": "Invalid credentials"}
 
     if username in USERS and USERS[username] == password:
         token = create_jwt_token(username)
@@ -156,10 +166,9 @@ def login(credentials: LoginCredentials) -> dict:
             "status": "success"
         }
     else:
-        return JSONResponse(
-            status_code=401, 
-            content={"detail": "Invalid credentials", "status": "error"}
-        )
+        # Set status code via context and return error message
+        ctx.response.status_code = 401
+        return {"detail": "Invalid credentials"}
 
 @service.api(
     input=JSON(pydantic_model=StudentData),
@@ -169,10 +178,7 @@ def login(credentials: LoginCredentials) -> dict:
 async def predict(input_data: StudentData, ctx: bentoml.Context) -> dict:
     """Single student admission prediction endpoint"""
     if not MODELS_LOADED:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "Models not available", "status": "error"}
-        )
+        raise ValueError("Models not available")
     
     try:
         # Get authenticated user
@@ -191,10 +197,10 @@ async def predict(input_data: StudentData, ctx: bentoml.Context) -> dict:
         ]])
         
         # Scale the features
-        scaled_features = await scaler_runner.transform.async_run(input_array)
+        scaled_features = scaler.transform(input_array)
         
         # Make prediction
-        prediction = await admission_model_runner.predict.async_run(scaled_features)
+        prediction = admission_model.predict(scaled_features)
         chance_of_admit = float(prediction[0])
         
         # Ensure prediction is within valid range
@@ -214,10 +220,7 @@ async def predict(input_data: StudentData, ctx: bentoml.Context) -> dict:
         }
         
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Prediction failed: {str(e)}", "status": "error"}
-        )
+        raise ValueError(f"Prediction failed: {str(e)}")
 
 @service.api(
     input=JSON(pydantic_model=BatchStudentData),
@@ -227,10 +230,7 @@ async def predict(input_data: StudentData, ctx: bentoml.Context) -> dict:
 async def predict_batch(input_data: BatchStudentData, ctx: bentoml.Context) -> dict:
     """Batch prediction endpoint for multiple students"""
     if not MODELS_LOADED:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "Models not available", "status": "error"}
-        )
+        raise ValueError("Models not available")
     
     try:
         # Get authenticated user
@@ -257,8 +257,9 @@ async def predict_batch(input_data: BatchStudentData, ctx: bentoml.Context) -> d
                 ]])
                 
                 # Scale and predict
-                scaled_features = await scaler_runner.transform.async_run(input_array)
-                prediction = await admission_model_runner.predict.async_run(scaled_features)
+                # Scale the features and make prediction
+                scaled_features = scaler.transform(input_array)
+                prediction = admission_model.predict(scaled_features)
                 chance_of_admit = float(prediction[0])
                 
                 # Ensure valid range
@@ -308,7 +309,4 @@ async def predict_batch(input_data: BatchStudentData, ctx: bentoml.Context) -> d
         }
         
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Batch prediction failed: {str(e)}", "status": "error"}
-        )
+        raise ValueError(f"Batch prediction failed: {str(e)}")
