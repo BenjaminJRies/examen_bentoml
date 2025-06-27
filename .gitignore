@@ -33,3 +33,9 @@ build/
 
 # OS
 Thumbs.db
+
+# Large tar files (deliverables - too large for git)
+*.tar
+*.tar.gz
+benjaminries_admission_prediction.tar
+benjaminries_bentoml_exam_submission.tar.gz
