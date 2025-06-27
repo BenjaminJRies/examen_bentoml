@@ -1,0 +1,65 @@
+# Docker ignore file to reduce build context size
+
+# Git files
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+
+# Virtual environments (VERY IMPORTANT - this was missing!)
+bentoml_env/
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large files and archives (VERY IMPORTANT)
+*.tar
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Jupyter notebooks (not needed in container)
+*.ipynb
+
+# Documentation (except main README)
+*.md
+!README.md
+
+# Test files (not needed in container)
+test_*.py
+*_test.py
+
+# Demo files
+demo_*.py
+
+# Raw data (only processed data needed)
+data/raw/
+
+# Temporary files
+tmp/
+temp/
+
+# Extra dockerfiles
+Dockerfile.optimized
